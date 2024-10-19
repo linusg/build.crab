@@ -114,7 +114,15 @@ pub fn addCargoBuild(b: *std.Build, config: CargoConfig, args: anytype) std.Buil
         if (zig_target.os.tag == .windows) {
             target.abi = .gnu;
         }
-        const rust_target = @This().Target.fromZig(target) catch @panic("unable to convert target triple to Rust");
+        const host_is_alpine_linux = b.graph.host.result.os.tag == .linux and blk: {
+            std.fs.cwd().access("/etc/alpine-release", .{}) catch break :blk false;
+            break :blk true;
+        };
+        const vendor: ?@This().Vendor = if (host_is_alpine_linux) .alpine else null;
+        const rust_target = @This().Target.fromZig(
+            target,
+            .{ .vendor = vendor },
+        ) catch @panic("unable to convert target triple to Rust");
         build_crab.addArg("--target");
         build_crab.addArg(b.fmt("{}", .{rust_target}));
     }

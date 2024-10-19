@@ -156,6 +156,7 @@ pub const Arch = enum {
 };
 
 pub const Vendor = enum {
+    alpine,
     apple,
     esp,
     fortanix,
@@ -436,6 +437,18 @@ test "tier 2" {
         const target = try Target.fromArchOsAbi("riscv64-linux-gnu", .{});
         const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
         try expectEqualStrings("riscv64gc-unknown-linux-gnu", target_str);
+    }
+
+    {
+        const target = try Target.fromArchOsAbi("x86_64-linux-musl", .{});
+        const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
+        try expectEqualStrings("x86_64-unknown-linux-musl", target_str);
+    }
+
+    {
+        const target = try Target.fromArchOsAbi("x86_64-linux-musl", .{ .vendor = .alpine });
+        const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
+        try expectEqualStrings("x86_64-alpine-linux-musl", target_str);
     }
 
     // https://doc.rust-lang.org/rustc/platform-support.html#tier-2-without-host-tools

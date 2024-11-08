@@ -38,7 +38,7 @@ pub const Target = struct {
             .custom => |name| name,
             else => |vendor| @tagName(vendor),
         };
-        if (self.arch == .wasm32 and self.os == .wasi) {
+        if (self.arch == .wasm32 and (self.os == .wasip1 or self.os == .wasip2)) {
             try writer.print("{s}-{s}", .{ @tagName(self.arch), @tagName(self.os) });
         } else if (self.env == .none) {
             try writer.print("{s}-{s}-{s}", .{ @tagName(self.arch), vendor, @tagName(self.os) });
@@ -225,7 +225,8 @@ pub const Os = enum {
     unknown,
     vita,
     vxworks,
-    wasi,
+    wasip1,
+    wasip2,
     watchos,
     windows,
     xous,
@@ -251,7 +252,12 @@ pub const Os = enum {
             .watchos => .watchos,
             .hermit => .hermit,
             .hurd => .hurd,
-            .wasi => .wasi,
+            .wasi => if (os.version_range.semver.includesVersion(.{ .major = 0, .minor = 1, .patch = 0 }))
+                .wasip1
+            else if (os.version_range.semver.includesVersion(.{ .major = 0, .minor = 2, .patch = 0 }))
+                .wasip2
+            else
+                error.Unsupported,
             .emscripten => .emscripten,
             .illumos => .illumos,
             .other => .unknown,
@@ -478,7 +484,7 @@ test "tier 2" {
     {
         const target = try Target.fromArchOsAbi("wasm32-wasi", .{});
         const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
-        try expectEqualStrings("wasm32-wasi", target_str);
+        try expectEqualStrings("wasm32-wasip1", target_str);
     }
 }
 
@@ -501,4 +507,10 @@ test "tier 3" {
         const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
         try expectEqualStrings("riscv64-linux-android", target_str);
     }
+
+    // Does not work on Zig 0.13.0, the supported version range has since been updated to include WASI preview 2
+    if (Target.fromArchOsAbi("wasm32-wasi.0.2.0")) |target| {
+        const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
+        try expectEqualStrings("wasm32-wasip2", target_str);
+    } else |_| {}
 }

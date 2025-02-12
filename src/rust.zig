@@ -319,8 +319,17 @@ pub const Env = enum {
                 else => .androideabi,
             },
             .musl => .musl,
-            .musleabi => .musleabi,
-            .musleabihf => .musleabihf,
+            .muslabi64 => .muslabi64,
+            .musleabi => switch (target.cpu.arch) {
+                // Rust just uses `musl` instead of `musleabi`
+                .mips => .musl,
+                else => .musleabi,
+            },
+            .musleabihf => switch (target.cpu.arch) {
+                // Rust has hardfloat enabled for powerpc/musl
+                .powerpc => .musl,
+                else => .musleabihf,
+            },
             .msvc => .msvc,
             .macabi => .macabi,
             else => error.Unsupported,
@@ -476,6 +485,12 @@ test "tier 2" {
     }
 
     {
+        const target = try Target.fromArchOsAbi("arm-linux-musleabihf", .{});
+        const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
+        try expectEqualStrings("arm-unknown-linux-musleabihf", target_str);
+    }
+
+    {
         const target = try Target.fromArchOsAbi("x86-linux-android", .{});
         const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
         try expectEqualStrings("i686-linux-android", target_str);
@@ -497,6 +512,24 @@ test "tier 3" {
     // https://doc.rust-lang.org/rustc/platform-support.html#tier-3
 
     {
+        const target = try Target.fromArchOsAbi("mips-linux-musleabi", .{});
+        const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
+        try expectEqualStrings("mips-unknown-linux-musl", target_str);
+    }
+
+    {
+        const target = try Target.fromArchOsAbi("mips64-linux-muslabi64", .{});
+        const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
+        try expectEqualStrings("mips64-unknown-linux-muslabi64", target_str);
+    }
+
+    {
+        const target = try Target.fromArchOsAbi("powerpc-linux-musleabihf", .{});
+        const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
+        try expectEqualStrings("powerpc-unknown-linux-musl", target_str);
+    }
+
+    {
         const target = try Target.fromArchOsAbi("riscv64-linux-musl", .{});
         const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
         try expectEqualStrings("riscv64gc-unknown-linux-musl", target_str);
@@ -509,7 +542,7 @@ test "tier 3" {
     }
 
     // Does not work on Zig 0.13.0, the supported version range has since been updated to include WASI preview 2
-    if (Target.fromArchOsAbi("wasm32-wasi.0.2.0")) |target| {
+    if (Target.fromArchOsAbi("wasm32-wasi.0.2.0", .{})) |target| {
         const target_str = try std.fmt.allocPrint(allocator, "{}", .{target});
         try expectEqualStrings("wasm32-wasip2", target_str);
     } else |_| {}

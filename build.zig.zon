@@ -1,6 +1,7 @@
 .{
-    .name = "build.crab",
+    .name = .build_crab,
     .version = "0.1.7",
+    .fingerprint = 0x87840cb71d0b6ce1,
 
     .dependencies = .{},
 

@@ -306,7 +306,11 @@ pub const Os = union(enum) {
             .rtems => .rtems,
             .visionos => .visionos,
 
-            // .contiki, .elfiamcu, .plan9, .serenity, .zos, .driverkit, .ps3, .ps4, .ps5, .amdhsa, .amdpal, .mesa3d, .nvcl, .opencl, .opengl, .vulkan
+            // No longer supported by Zig
+            // .aix, .solaris
+
+            // Not supported by Rust
+            // .contiki, .managarm, .plan9, .serenity, .driverkit, .@"3ds", .ps3, .ps4, .ps5, .psp, .vita, .amdhsa, .amdpal, .mesa3d, .nvcl, .opencl, .opengl, .vulkan, .tios
             else => error.Unsupported,
         };
     }
@@ -363,6 +367,7 @@ pub const Env = union(enum) {
                         .elf => .elf,
                         else => error.Unsupported,
                     };
+                if (target.os.tag == .maccatalyst) break :blk .macabi;
                 break :blk .none;
             },
             .gnu => blk: {
@@ -385,8 +390,16 @@ pub const Env = union(enum) {
             .androideabi => .androideabi,
             .musl => .musl,
             .muslabi64 => .muslabi64,
-            .musleabi => .musleabi,
-            .musleabihf => .musleabihf,
+            .musleabi => switch (target.cpu.arch) {
+                // Rust just uses `musl` instead of `musleabi`
+                .mips => .musl,
+                else => .musleabi,
+            },
+            .musleabihf => switch (target.cpu.arch) {
+                // Rust has hardfloat enabled for powerpc/musl
+                .powerpc => .musl,
+                else => .musleabihf,
+            },
             .msvc => .msvc,
             .ohos => .ohos,
             .simulator => .sim,
@@ -571,6 +584,11 @@ test "tier 2" {
     }
 
     {
+        const target = try Target.fromArchOsAbi(io, "arm-linux-musleabihf");
+        try expectFmt("arm-unknown-linux-musleabihf", "{f}", .{target});
+    }
+
+    {
         const target = try Target.fromArchOsAbi(io, "x86-linux-android");
         try expectFmt("i686-linux-android", "{f}", .{target});
     }
@@ -586,6 +604,21 @@ test "tier 3" {
     const io = std.testing.io;
 
     // https://doc.rust-lang.org/rustc/platform-support.html#tier-3
+
+    {
+        const target = try Target.fromArchOsAbi(io, "mips-linux-musleabi");
+        try expectFmt("mips-unknown-linux-musl", "{f}", .{target});
+    }
+
+    {
+        const target = try Target.fromArchOsAbi(io, "mips64-linux-muslabi64");
+        try expectFmt("mips64-unknown-linux-muslabi64", "{f}", .{target});
+    }
+
+    {
+        const target = try Target.fromArchOsAbi(io, "powerpc-linux-musleabihf");
+        try expectFmt("powerpc-unknown-linux-musl", "{f}", .{target});
+    }
 
     {
         const target = try Target.fromArchOsAbi(io, "riscv64-linux-musl");

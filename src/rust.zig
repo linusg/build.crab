@@ -387,8 +387,16 @@ pub const Env = union(enum) {
             .androideabi => .androideabi,
             .musl => .musl,
             .muslabi64 => .muslabi64,
-            .musleabi => .musleabi,
-            .musleabihf => .musleabihf,
+            .musleabi => switch (target.cpu.arch) {
+                // Rust just uses `musl` instead of `musleabi`
+                .mips => .musl,
+                else => .musleabi,
+            },
+            .musleabihf => switch (target.cpu.arch) {
+                // Rust has hardfloat enabled for powerpc/musl
+                .powerpc => .musl,
+                else => .musleabihf,
+            },
             .msvc => .msvc,
             .macabi => .macabi,
             .ohos => .ohos,
@@ -603,6 +611,12 @@ test "tier 2" {
     }
 
     {
+        const target = try Target.fromArchOsAbi("arm-linux-musleabihf");
+        const target_str = try std.fmt.allocPrint(allocator, "{f}", .{target});
+        try expectEqualStrings("arm-unknown-linux-musleabihf", target_str);
+    }
+
+    {
         const target = try Target.fromArchOsAbi("x86-linux-android");
         const target_str = try std.fmt.allocPrint(allocator, "{f}", .{target});
         try expectEqualStrings("i686-linux-android", target_str);
@@ -622,6 +636,24 @@ test "tier 3" {
     const expectEqualStrings = std.testing.expectEqualStrings;
 
     // https://doc.rust-lang.org/rustc/platform-support.html#tier-3
+
+    {
+        const target = try Target.fromArchOsAbi("mips-linux-musleabi");
+        const target_str = try std.fmt.allocPrint(allocator, "{f}", .{target});
+        try expectEqualStrings("mips-unknown-linux-musl", target_str);
+    }
+
+    {
+        const target = try Target.fromArchOsAbi("mips64-linux-muslabi64");
+        const target_str = try std.fmt.allocPrint(allocator, "{f}", .{target});
+        try expectEqualStrings("mips64-unknown-linux-muslabi64", target_str);
+    }
+
+    {
+        const target = try Target.fromArchOsAbi("powerpc-linux-musleabihf");
+        const target_str = try std.fmt.allocPrint(allocator, "{f}", .{target});
+        try expectEqualStrings("powerpc-unknown-linux-musl", target_str);
+    }
 
     {
         const target = try Target.fromArchOsAbi("riscv64-linux-musl");

@@ -159,7 +159,8 @@ fn filterObjFilesWindows(allocator: std.mem.Allocator, temp_dir: []const u8, rem
         var file = try tdir.openFile(entry.path, .{});
         defer file.close();
 
-        const data = try file.readToEndAlloc(allocator, 50 * 1024 * 1024);
+        var file_reader = file.reader(&.{});
+        const data = try file_reader.interface.allocRemaining(allocator, .unlimited);
         defer allocator.free(data);
 
         const coff = std.coff.Coff.init(data, false) catch std.coff.Coff{

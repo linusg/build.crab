@@ -170,7 +170,7 @@ pub fn main() !void {
 }
 
 fn write_dep_file(allocator: std.mem.Allocator, cwd: std.fs.Dir, dep_file_path: []const u8, writer: *std.Io.Writer) !void {
-    const dep_file_content = try cwd.readFileAlloc(allocator, dep_file_path, 100 * 1024 * 1024);
+    const dep_file_content = try cwd.readFileAlloc(dep_file_path, allocator, .unlimited);
     defer allocator.free(dep_file_content);
 
     // std.Build.Cache does not support directories in the dep file.

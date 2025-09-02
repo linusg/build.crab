@@ -6,8 +6,8 @@ const Format = enum {
     macho,
 };
 
-fn printUsage() !void {
-    var stdout_writer = std.fs.File.stdout().writer(&.{});
+fn printUsage(io: std.Io) !void {
+    var stdout_writer = std.Io.File.stdout().writer(io, &.{});
     const stdout = &stdout_writer.interface;
     try stdout.writeAll(
         "Usage: strip_symbols " ++
@@ -20,12 +20,15 @@ fn printUsage() !void {
     );
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
 
-    var args = try std.process.argsWithAllocator(allocator);
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.ioBasic();
+
+    var args = init.args.iterate();
     _ = args.next();
     var archive_path_opt: ?[]const u8 = null;
     var temp_dir_opt: ?[]const u8 = null;
@@ -56,7 +59,7 @@ pub fn main() !void {
 
     if (archive_path_opt == null or temp_dir_opt == null or output_opt == null or remove_symbol.items.len == 0) {
         std.log.err("One of the required arguments is missing", .{});
-        try printUsage();
+        try printUsage(io);
         return error.RequiredArgMissing;
     }
 
@@ -73,7 +76,7 @@ pub fn main() !void {
         .macos => "macho",
         else => {
             std.log.info("target os is not recognized, doing nothing", .{});
-            try doNothing(archive_path, output);
+            try doNothing(io, archive_path, output);
             return;
         },
     };
@@ -85,11 +88,11 @@ pub fn main() !void {
 
     if (format_enum == .elf or format_enum == .macho) {
         std.log.info("format is not supported yer, doing nothing", .{});
-        try doNothing(archive_path, output);
+        try doNothing(io, archive_path, output);
         return;
     }
 
-    const ar_extract = try std.process.Child.run(.{ .allocator = allocator, .argv = &[_][]const u8{
+    const ar_extract = try std.process.run(allocator, io, .{ .argv = &[_][]const u8{
         "zig",
         "ar",
         "x",
@@ -98,15 +101,15 @@ pub fn main() !void {
         temp_dir,
     } });
 
-    if (ar_extract.term != .Exited or ar_extract.term.Exited != 0) {
-        var stderr_writer = std.fs.File.stderr().writer(&.{});
+    if (ar_extract.term != .exited or ar_extract.term.exited != 0) {
+        var stderr_writer = std.Io.File.stderr().writer(io, &.{});
         const stderr = &stderr_writer.interface;
         try stderr.writeAll(ar_extract.stderr);
         return error.ArError;
     }
 
     const files_to_keep = switch (format_enum) {
-        .coff => try filterObjFilesWindows(allocator, temp_dir, remove_symbol.items),
+        .coff => try filterObjFilesWindows(allocator, io, temp_dir, remove_symbol.items),
         .elf, .macho => unreachable,
     };
 
@@ -117,33 +120,33 @@ pub fn main() !void {
     try ar_repack_argv.append(allocator, output);
     try ar_repack_argv.appendSlice(allocator, files_to_keep);
 
-    const ar_repack = try std.process.Child.run(.{ .allocator = allocator, .argv = ar_repack_argv.items });
+    const ar_repack = try std.process.run(allocator, io, .{ .argv = ar_repack_argv.items });
 
-    if (ar_repack.term != .Exited or ar_repack.term.Exited != 0) {
-        var stderr_writer = std.fs.File.stderr().writer(&.{});
+    if (ar_repack.term != .exited or ar_repack.term.exited != 0) {
+        var stderr_writer = std.Io.File.stderr().writer(io, &.{});
         const stderr = &stderr_writer.interface;
         try stderr.writeAll(ar_repack.stderr);
         return error.ArError;
     }
 }
 
-fn doNothing(input: []const u8, output: []const u8) !void {
-    const cwd = std.fs.cwd();
-    try cwd.copyFile(input, cwd, output, .{});
+fn doNothing(io: std.Io, input: []const u8, output: []const u8) !void {
+    const cwd = std.Io.Dir.cwd();
+    try cwd.copyFile(input, cwd, output, io, .{});
 }
 
-fn filterObjFilesWindows(allocator: std.mem.Allocator, temp_dir: []const u8, remove_symbols: [][]const u8) ![][]const u8 {
-    var tdir = try std.fs.cwd().openDir(temp_dir, .{ .iterate = true, .no_follow = true });
-    defer tdir.close();
+fn filterObjFilesWindows(allocator: std.mem.Allocator, io: std.Io, temp_dir: []const u8, remove_symbols: [][]const u8) ![][]const u8 {
+    var tdir = try std.Io.Dir.cwd().openDir(io, temp_dir, .{ .iterate = true, .follow_symlinks = false });
+    defer tdir.close(io);
 
     var walker = try tdir.walk(allocator);
     defer walker.deinit();
 
     var files_to_keep: std.ArrayList([]const u8) = .empty;
 
-    while (try walker.next()) |entry| {
+    while (try walker.next(io)) |entry| {
         // Don't go deeper
-        if (entry.dir.fd != tdir.fd) {
+        if (entry.dir.handle != tdir.handle) {
             continue;
         }
         if (entry.kind != .file) {
@@ -156,10 +159,12 @@ fn filterObjFilesWindows(allocator: std.mem.Allocator, temp_dir: []const u8, rem
 
         std.log.debug("Reading file {s}", .{entry.path});
 
-        var file = try tdir.openFile(entry.path, .{});
-        defer file.close();
+        var file = try tdir.openFile(io, entry.path, .{});
+        defer file.close(io);
 
-        const data = try file.readToEndAlloc(allocator, 50 * 1024 * 1024);
+        var file_reader = file.reader(io, &.{});
+        const reader = &file_reader.interface;
+        const data = try reader.allocRemaining(allocator, .unlimited);
         defer allocator.free(data);
 
         const coff = std.coff.Coff.init(data, false) catch std.coff.Coff{

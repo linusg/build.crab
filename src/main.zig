@@ -91,7 +91,7 @@ pub fn main(init: std.process.Init) !void {
     const cargo_result = try std.process.run(gpa, io, .{
         .argv = cargo_cmd.items,
         // TODO: Dump output to a file
-        .max_output_bytes = 50 * 1024 * 1024,
+        // .max_output_bytes = 50 * 1024 * 1024,
     });
     defer {
         gpa.free(cargo_result.stdout);
@@ -161,7 +161,7 @@ pub fn main(init: std.process.Init) !void {
             };
             defer dst.close(io);
             const stat = try dst.stat(io);
-            var dst_writer: std.Io.File.Writer = .init(.{ .handle = dst.handle }, io, &.{});
+            var dst_writer: std.Io.File.Writer = .init(.{ .handle = dst.handle, .flags = .{ .nonblocking = false } }, io, &.{});
             try dst_writer.seekTo(stat.size);
             try write_dep_file(gpa, io, cwd, artifact_d, &dst_writer.interface);
         }

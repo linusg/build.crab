@@ -30,6 +30,8 @@ pub const Target = struct {
     pub fn format(self: Target, writer: *std.Io.Writer) !void {
         if (self.arch == .wasm32 and (self.os == .wasip1 or self.os == .wasip2)) {
             try writer.print("{f}-{f}", .{ self.arch, self.os });
+        } else if ((self.arch == .wasm32 or self.arch == .wasm64) and self.os == .none and self.env == .none) {
+            try writer.print("{f}-unknown-unknown", .{self.arch});
         } else if (self.env == .none) {
             try writer.print("{f}-{f}-{f}", .{ self.arch, self.vendor, self.os });
         } else if (self.vendor == .unknown and (self.env == .android or self.env == .androideabi)) {
@@ -629,6 +631,12 @@ test "tier 2" {
         const target = try Target.fromArchOsAbi(io, "wasm32-wasi");
         const target_str = try std.fmt.allocPrint(allocator, "{f}", .{target});
         try expectEqualStrings("wasm32-wasip1", target_str);
+    }
+
+    {
+        const target = try Target.fromArchOsAbi(io, "wasm32-freestanding-none");
+        const target_str = try std.fmt.allocPrint(allocator, "{f}", .{target});
+        try expectEqualStrings("wasm32-unknown-unknown", target_str);
     }
 }
 

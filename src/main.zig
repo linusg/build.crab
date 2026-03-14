@@ -15,12 +15,14 @@ fn printUsage(io: std.Io) !void {
 
 const CargoMessage = struct {
     reason: []const u8,
+    package_id: ?[]const u8 = null,
     filenames: ?[][]const u8 = null,
     manifest_path: ?[]const u8 = null,
     target: ?CargoTarget = null,
 };
 
 const CargoTarget = struct {
+    name: []const u8,
     kind: [][]const u8,
 };
 
@@ -88,34 +90,61 @@ pub fn main(init: std.process.Init) !void {
     }
 
     std.log.debug("about to execute {f}", .{std.json.fmt(cargo_cmd.items, .{})});
-    const cargo_result = try std.process.run(gpa, io, .{
-        .argv = cargo_cmd.items,
-        // TODO: Dump output to a file
-        // .max_output_bytes = 50 * 1024 * 1024,
+
+    var progress = std.Progress.start(io, .{
+        .root_name = "cargo build",
     });
-    defer {
-        gpa.free(cargo_result.stdout);
-        gpa.free(cargo_result.stderr);
+    defer progress.end();
+    const root_node = progress;
+
+    var child = try std.process.spawn(io, .{
+        .argv = cargo_cmd.items,
+        .stdout = .pipe,
+        .stderr = .inherit,
+    });
+    defer child.kill(io);
+
+    var messages: std.ArrayList(CargoMessage) = .empty;
+    defer messages.deinit(gpa);
+
+    const stdout_buffer = try gpa.alloc(u8, 1 * 1024 * 1024);
+    defer gpa.free(stdout_buffer);
+    var reader = child.stdout.?.reader(io, stdout_buffer);
+
+    var current_crate_node: std.Progress.Node = .none;
+    defer current_crate_node.end();
+
+    while (true) {
+        const line = try reader.interface.takeDelimiter('\n') orelse break;
+
+        std.log.debug("parsing cargo output: {s}", .{line});
+        const message = std.json.parseFromSliceLeaky(CargoMessage, arena, line, .{ .ignore_unknown_fields = true }) catch |err| {
+            std.log.debug("failed to parse cargo output as JSON: {any} (line: {s})", .{ err, line });
+            continue;
+        };
+
+        if (std.mem.eql(u8, message.reason, "compiler-artifact")) {
+            if (message.target) |target| {
+                current_crate_node.end();
+                current_crate_node = root_node.start(target.name, 0);
+            }
+            try messages.append(gpa, message);
+        } else if (std.mem.eql(u8, message.reason, "build-script-executed")) {
+            if (message.package_id) |id| {
+                current_crate_node.end();
+                current_crate_node = root_node.start(id, 0);
+            }
+        }
     }
 
-    var stderr_writer = std.Io.File.stderr().writer(io, &.{});
-    const stderr = &stderr_writer.interface;
-    try stderr.writeAll(cargo_result.stderr);
-    std.log.debug("cargo exit status {any}", .{cargo_result.term});
-    switch (cargo_result.term) {
+    const term = try child.wait(io);
+    std.log.debug("cargo exit status {any}", .{term});
+    switch (term) {
         .exited => |exit_code| if (exit_code != 0) std.process.exit(1),
         else => std.process.exit(1),
     }
 
-    var lines = std.mem.tokenizeScalar(u8, cargo_result.stdout, '\n');
-    outer: while (lines.next()) |line| {
-        std.log.debug("parsing cargo output: {s}", .{line});
-        const message = try std.json.parseFromSliceLeaky(CargoMessage, arena, line, .{ .ignore_unknown_fields = true });
-        if (!std.mem.eql(u8, message.reason, "compiler-artifact")) {
-            std.log.debug("not a compiler-artifact, ignored", .{});
-            continue;
-        }
-
+    outer: for (messages.items) |message| {
         const artifact_manifest = message.manifest_path orelse @panic("expected 'manifest_path' to contain a path to artifact's Cargo.toml");
         if (!std.mem.eql(u8, artifact_manifest, manifest_path.?)) {
             std.log.debug("artifact's manifest-path [{s}] does not equal to package's manifest-path, ignored", .{artifact_manifest});

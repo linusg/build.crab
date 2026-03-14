@@ -28,7 +28,7 @@ pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const gpa = init.gpa;
     const io = init.io;
-    var args = init.minimal.args.iterate();
+    var args = try init.minimal.args.iterateAllocator(arena);
     var command: ?[]const u8 = null;
     var deps_file: ?[]const u8 = null;
     var target_dir: ?[]const u8 = null;

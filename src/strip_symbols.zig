@@ -20,15 +20,11 @@ fn printUsage(io: std.Io) !void {
     );
 }
 
-pub fn main(init: std.process.Init.Minimal) !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.arena.allocator();
+    const io = init.io;
 
-    var threaded: std.Io.Threaded = .init_single_threaded;
-    const io = threaded.ioBasic();
-
-    var args = init.args.iterate();
+    var args = init.minimal.args.iterate();
     _ = args.next();
     var archive_path_opt: ?[]const u8 = null;
     var temp_dir_opt: ?[]const u8 = null;

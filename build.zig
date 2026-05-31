@@ -32,10 +32,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(build_crab);
     const run_build_crab = b.addRunArtifact(build_crab);
     run_build_crab.step.dependOn(b.getInstallStep());
-
-    if (b.args) |args| {
-        run_build_crab.addArgs(args);
-    }
+    run_build_crab.addPassthruArgs();
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_build_crab.step);
@@ -52,10 +49,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(strip_symbols);
     const run_strip_symbols = b.addRunArtifact(strip_symbols);
     run_strip_symbols.step.dependOn(b.getInstallStep());
-
-    if (b.args) |args| {
-        run_strip_symbols.addArgs(args);
-    }
+    run_strip_symbols.addPassthruArgs();
 
     const run_strip_symbols_step = b.step("strip", "Run the app");
     run_strip_symbols_step.dependOn(&run_strip_symbols.step);

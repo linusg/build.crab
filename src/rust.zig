@@ -362,7 +362,7 @@ pub const Env = union(enum) {
     pub fn fromZig(target: std.Target) error{Unsupported}!Env {
         return switch (target.abi) {
             .none => blk: {
-                if (target.cpu.arch.isRISCV())
+                if (target.cpu.arch.isRiscv())
                     break :blk switch (target.ofmt) {
                         .elf => .elf,
                         else => error.Unsupported,

@@ -104,6 +104,8 @@ pub fn main(init: std.process.Init) !void {
         else => std.process.exit(1),
     }
 
+    const cwd = std.Io.Dir.cwd();
+
     var lines = std.mem.tokenizeScalar(u8, cargo_result.stdout, '\n');
     outer: while (lines.next()) |line| {
         std.log.debug("parsing cargo output: {s}", .{line});
@@ -115,9 +117,11 @@ pub fn main(init: std.process.Init) !void {
             continue;
         }
 
-        const artifact_manifest = message.manifest_path orelse @panic("expected 'manifest_path' to contain a path to artifact's Cargo.toml");
-        if (!std.mem.eql(u8, artifact_manifest, manifest_path.?)) {
-            std.log.debug("artifact's manifest-path [{s}] does not equal to package's manifest-path, ignored", .{artifact_manifest});
+        const artifact_manifest_path = message.manifest_path orelse @panic("expected 'manifest_path' to contain a path to artifact's Cargo.toml");
+        const manifest_path_abs = try cwd.realPathFileAlloc(io, manifest_path.?, allocator);
+        defer allocator.free(manifest_path_abs);
+        if (!std.mem.eql(u8, artifact_manifest_path, manifest_path_abs)) {
+            std.log.debug("artifact's manifest-path [{s}] does not equal to package's manifest-path [{s}], ignored", .{ artifact_manifest_path, manifest_path_abs });
             continue;
         }
 
@@ -134,7 +138,6 @@ pub fn main(init: std.process.Init) !void {
             @panic(try std.fmt.allocPrint(allocator, "no filenames provided by Cargo", .{}));
         }
 
-        const cwd = std.Io.Dir.cwd();
         const dst_dir = try cwd.openDir(io, target_dir.?, .{});
         for (filenames) |artifact| {
             const basename = std.fs.path.basename(artifact);

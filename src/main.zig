@@ -144,9 +144,13 @@ pub fn main(init: std.process.Init) !void {
         else => std.process.exit(1),
     }
 
+    const cwd_dir = std.Io.Dir.cwd();
+    const wanted_manifest = std.Io.Dir.realPathFileAlloc(cwd_dir, io, manifest_path.?, gpa) catch manifest_path.?;
+
     outer: for (messages.items) |message| {
         const artifact_manifest = message.manifest_path orelse @panic("expected 'manifest_path' to contain a path to artifact's Cargo.toml");
-        if (!std.mem.eql(u8, artifact_manifest, manifest_path.?)) {
+        const artifact_manifest_real = std.Io.Dir.realPathFileAlloc(cwd_dir, io, artifact_manifest, gpa) catch artifact_manifest;
+        if (!std.mem.eql(u8, artifact_manifest_real, wanted_manifest)) {
             std.log.debug("artifact's manifest-path [{s}] does not equal to package's manifest-path, ignored", .{artifact_manifest});
             continue;
         }

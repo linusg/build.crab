@@ -82,9 +82,9 @@ const CargoConfig = struct {
 
         pub fn override(self: PartialTarget, target: BuildCrab.rust.Target) BuildCrab.rust.Target {
             var result = target;
-            inline for (@typeInfo(@TypeOf(self)).@"struct".fields) |field| {
-                const sf = @field(self, field.name);
-                const rf = &@field(result, field.name);
+            inline for (@typeInfo(@TypeOf(self)).@"struct".field_names) |field_name| {
+                const sf = @field(self, field_name);
+                const rf = &@field(result, field_name);
                 if (sf) |non_null| {
                     rf.* = non_null;
                 }
@@ -227,8 +227,8 @@ pub fn addRustStaticlib(b: *std.Build, config: StaticlibConfig, args: anytype) s
 }
 
 fn targetFromUserInputOptions(args: anytype) std.Target {
-    inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| {
-        const v = @field(args, field.name);
+    inline for (@typeInfo(@TypeOf(args)).@"struct".field_names) |field_name| {
+        const v = @field(args, field_name);
         const T = @TypeOf(v);
         switch (T) {
             std.Target.Query => return std.zig.system.resolveTargetQuery(v) catch
@@ -244,9 +244,9 @@ fn targetFromUserInputOptions(args: anytype) std.Target {
 fn overrideTargetUserInput(args: anytype) @TypeOf(args) {
     var new_args = args;
     const host_target = @import("builtin").target;
-    inline for (@typeInfo(@TypeOf(args)).@"struct".fields) |field| {
-        const v = &@field(new_args, field.name);
-        const T = field.type;
+    inline for (@typeInfo(@TypeOf(args)).@"struct".field_names) |field_name| {
+        const v = &@field(new_args, field_name);
+        const T = @TypeOf(v);
         switch (T) {
             std.Target.Query => {
                 v.* = std.Target.Query.fromTarget(&host_target);

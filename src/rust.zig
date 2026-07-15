@@ -311,7 +311,8 @@ pub const Os = union(enum) {
             // No longer supported by Zig
             // .aix, .solaris
 
-            // .contiki, .elfiamcu, .plan9, .serenity, .zos, .driverkit, .ps3, .ps4, .ps5, .amdhsa, .amdpal, .mesa3d, .nvcl, .opencl, .opengl, .vulkan
+            // Not supported by Rust
+            // .contiki, .managarm, .plan9, .serenity, .driverkit, .@"3ds", .ps3, .ps4, .ps5, .psp, .vita, .amdhsa, .amdpal, .mesa3d, .nvcl, .opencl, .opengl, .vulkan, .tios
             else => error.Unsupported,
         };
     }

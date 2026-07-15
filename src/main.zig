@@ -30,7 +30,6 @@ pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const gpa = init.gpa;
     const io = init.io;
-    var args = try init.minimal.args.iterateAllocator(arena);
     var command: ?[]const u8 = null;
     var deps_file: ?[]const u8 = null;
     var target_dir: ?[]const u8 = null;
@@ -38,6 +37,8 @@ pub fn main(init: std.process.Init) !void {
     var cargo_args: std.ArrayList([]const u8) = .empty;
     defer cargo_args.deinit(gpa);
 
+    var args = try init.minimal.args.iterateAllocator(gpa);
+    defer args.deinit();
     _ = args.next();
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--command")) {
@@ -194,7 +195,8 @@ pub fn main(init: std.process.Init) !void {
             };
             defer dst.close(io);
             const stat = try dst.stat(io);
-            var dst_writer: std.Io.File.Writer = .init(.{ .handle = dst.handle, .flags = .{ .nonblocking = false } }, io, &.{});
+
+            var dst_writer = dst.writer(io, &.{});
             try dst_writer.seekTo(stat.size);
             try write_dep_file(gpa, io, cwd, artifact_d, &dst_writer.interface);
         }

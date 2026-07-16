@@ -15,19 +15,20 @@ fn printUsage(io: std.Io) !void {
 
 const CargoMessage = struct {
     reason: []const u8,
+    package_id: ?[]const u8 = null,
     filenames: ?[][]const u8 = null,
     manifest_path: ?[]const u8 = null,
     target: ?CargoTarget = null,
 };
 
 const CargoTarget = struct {
+    name: []const u8,
     kind: [][]const u8,
 };
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const allocator = init.gpa;
-
     var command: ?[]const u8 = null;
     var deps_file: ?[]const u8 = null;
     var target_dir: ?[]const u8 = null;
@@ -72,13 +73,15 @@ pub fn main(init: std.process.Init) !void {
 
     var cargo_cmd: std.ArrayList([]const u8) = .empty;
     defer cargo_cmd.deinit(allocator);
-    try cargo_cmd.append(allocator, "cargo");
-    try cargo_cmd.append(allocator, command orelse "build");
-    try cargo_cmd.append(allocator, "--message-format=json-render-diagnostics");
-    try cargo_cmd.append(allocator, "--target-dir");
-    try cargo_cmd.append(allocator, target_dir.?);
-    try cargo_cmd.append(allocator, "--manifest-path");
-    try cargo_cmd.append(allocator, manifest_path.?);
+    try cargo_cmd.appendSlice(allocator, &.{
+        "cargo",
+        command orelse "build",
+        "--message-format=json-render-diagnostics",
+        "--target-dir",
+        target_dir.?,
+        "--manifest-path",
+        manifest_path.?,
+    });
     for (cargo_args.items) |arg| {
         if (std.mem.containsAtLeast(u8, arg, 1, "--message-format")) {
             continue;
@@ -87,41 +90,68 @@ pub fn main(init: std.process.Init) !void {
     }
 
     std.log.debug("about to execute {f}", .{std.json.fmt(cargo_cmd.items, .{})});
-    const cargo_result = try std.process.run(allocator, io, .{
-        .argv = cargo_cmd.items,
+
+    var progress = std.Progress.start(io, .{
+        .root_name = "cargo build",
     });
-    defer {
-        allocator.free(cargo_result.stdout);
-        allocator.free(cargo_result.stderr);
+    defer progress.end();
+    const root_node = progress;
+
+    var child = try std.process.spawn(io, .{
+        .argv = cargo_cmd.items,
+        .stdout = .pipe,
+        .stderr = .inherit,
+    });
+    defer child.kill(io);
+
+    var messages: std.ArrayList(CargoMessage) = .empty;
+    defer messages.deinit(allocator);
+
+    const stdout_buffer = try allocator.alloc(u8, 1 * 1024 * 1024);
+    defer allocator.free(stdout_buffer);
+    var reader = child.stdout.?.reader(io, stdout_buffer);
+
+    var current_crate_node: std.Progress.Node = .none;
+    defer current_crate_node.end();
+
+    while (true) {
+        const line = try reader.interface.takeDelimiter('\n') orelse break;
+
+        std.log.debug("parsing cargo output: {s}", .{line});
+        const message = std.json.parseFromSliceLeaky(CargoMessage, allocator, line, .{ .ignore_unknown_fields = true }) catch |err| {
+            std.log.debug("failed to parse cargo output as JSON: {any} (line: {s})", .{ err, line });
+            continue;
+        };
+
+        if (std.mem.eql(u8, message.reason, "compiler-artifact")) {
+            if (message.target) |target| {
+                current_crate_node.end();
+                current_crate_node = root_node.start(target.name, 0);
+            }
+            try messages.append(allocator, message);
+        } else if (std.mem.eql(u8, message.reason, "build-script-executed")) {
+            if (message.package_id) |id| {
+                current_crate_node.end();
+                current_crate_node = root_node.start(id, 0);
+            }
+        }
     }
 
-    var stderr_writer = std.Io.File.stderr().writer(io, &.{});
-    const stderr = &stderr_writer.interface;
-    try stderr.writeAll(cargo_result.stderr);
-    std.log.debug("cargo exit status {any}", .{cargo_result.term});
-    switch (cargo_result.term) {
+    const term = try child.wait(io);
+    std.log.debug("cargo exit status {any}", .{term});
+    switch (term) {
         .exited => |exit_code| if (exit_code != 0) std.process.exit(1),
         else => std.process.exit(1),
     }
 
-    const cwd = std.Io.Dir.cwd();
+    const cwd_dir = std.Io.Dir.cwd();
+    const wanted_manifest = std.Io.Dir.realPathFileAlloc(cwd_dir, io, manifest_path.?, allocator) catch manifest_path.?;
 
-    var lines = std.mem.tokenizeScalar(u8, cargo_result.stdout, '\n');
-    outer: while (lines.next()) |line| {
-        std.log.debug("parsing cargo output: {s}", .{line});
-        const parsed_message = try std.json.parseFromSlice(CargoMessage, allocator, line, .{ .ignore_unknown_fields = true });
-        defer parsed_message.deinit();
-        const message = parsed_message.value;
-        if (!std.mem.eql(u8, message.reason, "compiler-artifact")) {
-            std.log.debug("not a compiler-artifact, ignored", .{});
-            continue;
-        }
-
-        const artifact_manifest_path = message.manifest_path orelse @panic("expected 'manifest_path' to contain a path to artifact's Cargo.toml");
-        const manifest_path_abs = try cwd.realPathFileAlloc(io, manifest_path.?, allocator);
-        defer allocator.free(manifest_path_abs);
-        if (!std.mem.eql(u8, artifact_manifest_path, manifest_path_abs)) {
-            std.log.debug("artifact's manifest-path [{s}] does not equal to package's manifest-path [{s}], ignored", .{ artifact_manifest_path, manifest_path_abs });
+    outer: for (messages.items) |message| {
+        const artifact_manifest = message.manifest_path orelse @panic("expected 'manifest_path' to contain a path to artifact's Cargo.toml");
+        const artifact_manifest_real = std.Io.Dir.realPathFileAlloc(cwd_dir, io, artifact_manifest, allocator) catch artifact_manifest;
+        if (!std.mem.eql(u8, artifact_manifest_real, wanted_manifest)) {
+            std.log.debug("artifact's manifest-path [{s}] does not equal to package's manifest-path, ignored", .{artifact_manifest});
             continue;
         }
 
@@ -138,11 +168,12 @@ pub fn main(init: std.process.Init) !void {
             @panic(try std.fmt.allocPrint(allocator, "no filenames provided by Cargo", .{}));
         }
 
+        const cwd = std.Io.Dir.cwd();
         const dst_dir = try cwd.openDir(io, target_dir.?, .{});
         for (filenames) |artifact| {
             const basename = std.fs.path.basename(artifact);
             std.log.debug("About to copy '{s}' to '{s}/{s}'", .{ artifact, target_dir.?, basename });
-            try std.Io.Dir.copyFile(cwd, artifact, dst_dir, basename, io, .{});
+            _ = try cwd.updateFile(io, artifact, dst_dir, basename, .{});
         }
 
         if (deps_file) |deps_path| {
@@ -172,7 +203,10 @@ pub fn main(init: std.process.Init) !void {
 }
 
 fn write_dep_file(allocator: std.mem.Allocator, io: std.Io, cwd: std.Io.Dir, dep_file_path: []const u8, writer: *std.Io.Writer) !void {
-    const dep_file_content = try cwd.readFileAlloc(io, dep_file_path, allocator, .unlimited);
+    const dep_file = try cwd.openFile(io, dep_file_path, .{});
+    defer dep_file.close(io);
+    var dep_file_reader = dep_file.reader(io, &.{});
+    const dep_file_content = try dep_file_reader.interface.allocRemaining(allocator, .unlimited);
     defer allocator.free(dep_file_content);
 
     // std.Build.Cache does not support directories in the dep file.

@@ -88,6 +88,9 @@ pub fn addCargoBuild(b: *std.Build, config: CargoConfig, args: anytype) std.Buil
     const dep_args = overrideTargetUserInput(args);
     const build_crab_dep = b.dependency("build_crab", dep_args);
     const build_crab = b.addRunArtifact(build_crab_dep.artifact("build_crab"));
+    build_crab.setName(b.fmt("cargo {s}", .{config.command}));
+    build_crab.expectExitCode(0);
+    _ = build_crab.captureStdErr(.{});
 
     build_crab.addArg("--command");
     build_crab.addArg(config.command);

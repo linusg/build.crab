@@ -27,17 +27,16 @@ const CargoTarget = struct {
 };
 
 pub fn main(init: std.process.Init) !void {
-    const arena = init.arena.allocator();
-    const gpa = init.gpa;
     const io = init.io;
+    const allocator = init.gpa;
     var command: ?[]const u8 = null;
     var deps_file: ?[]const u8 = null;
     var target_dir: ?[]const u8 = null;
     var manifest_path: ?[]const u8 = null;
     var cargo_args: std.ArrayList([]const u8) = .empty;
-    defer cargo_args.deinit(gpa);
+    defer cargo_args.deinit(allocator);
 
-    var args = try init.minimal.args.iterateAllocator(gpa);
+    var args = try init.minimal.args.iterateAllocator(allocator);
     defer args.deinit();
     _ = args.next();
     while (args.next()) |arg| {
@@ -55,7 +54,7 @@ pub fn main(init: std.process.Init) !void {
         }
         if (std.mem.eql(u8, arg, "--")) {
             while (args.next()) |cargo_arg| {
-                try cargo_args.append(gpa, cargo_arg);
+                try cargo_args.append(allocator, cargo_arg);
             }
             break;
         }
@@ -73,8 +72,8 @@ pub fn main(init: std.process.Init) !void {
     }
 
     var cargo_cmd: std.ArrayList([]const u8) = .empty;
-    defer cargo_cmd.deinit(gpa);
-    try cargo_cmd.appendSlice(gpa, &.{
+    defer cargo_cmd.deinit(allocator);
+    try cargo_cmd.appendSlice(allocator, &.{
         "cargo",
         command orelse "build",
         "--message-format=json-render-diagnostics",
@@ -87,7 +86,7 @@ pub fn main(init: std.process.Init) !void {
         if (std.mem.containsAtLeast(u8, arg, 1, "--message-format")) {
             continue;
         }
-        try cargo_cmd.append(gpa, arg);
+        try cargo_cmd.append(allocator, arg);
     }
 
     std.log.debug("about to execute {f}", .{std.json.fmt(cargo_cmd.items, .{})});
@@ -106,10 +105,10 @@ pub fn main(init: std.process.Init) !void {
     defer child.kill(io);
 
     var messages: std.ArrayList(CargoMessage) = .empty;
-    defer messages.deinit(gpa);
+    defer messages.deinit(allocator);
 
-    const stdout_buffer = try gpa.alloc(u8, 1 * 1024 * 1024);
-    defer gpa.free(stdout_buffer);
+    const stdout_buffer = try allocator.alloc(u8, 1 * 1024 * 1024);
+    defer allocator.free(stdout_buffer);
     var reader = child.stdout.?.reader(io, stdout_buffer);
 
     var current_crate_node: std.Progress.Node = .none;
@@ -119,7 +118,7 @@ pub fn main(init: std.process.Init) !void {
         const line = try reader.interface.takeDelimiter('\n') orelse break;
 
         std.log.debug("parsing cargo output: {s}", .{line});
-        const message = std.json.parseFromSliceLeaky(CargoMessage, arena, line, .{ .ignore_unknown_fields = true }) catch |err| {
+        const message = std.json.parseFromSliceLeaky(CargoMessage, allocator, line, .{ .ignore_unknown_fields = true }) catch |err| {
             std.log.debug("failed to parse cargo output as JSON: {any} (line: {s})", .{ err, line });
             continue;
         };
@@ -129,7 +128,7 @@ pub fn main(init: std.process.Init) !void {
                 current_crate_node.end();
                 current_crate_node = root_node.start(target.name, 0);
             }
-            try messages.append(gpa, message);
+            try messages.append(allocator, message);
         } else if (std.mem.eql(u8, message.reason, "build-script-executed")) {
             if (message.package_id) |id| {
                 current_crate_node.end();
@@ -146,11 +145,11 @@ pub fn main(init: std.process.Init) !void {
     }
 
     const cwd_dir = std.Io.Dir.cwd();
-    const wanted_manifest = std.Io.Dir.realPathFileAlloc(cwd_dir, io, manifest_path.?, gpa) catch manifest_path.?;
+    const wanted_manifest = std.Io.Dir.realPathFileAlloc(cwd_dir, io, manifest_path.?, allocator) catch manifest_path.?;
 
     outer: for (messages.items) |message| {
         const artifact_manifest = message.manifest_path orelse @panic("expected 'manifest_path' to contain a path to artifact's Cargo.toml");
-        const artifact_manifest_real = std.Io.Dir.realPathFileAlloc(cwd_dir, io, artifact_manifest, gpa) catch artifact_manifest;
+        const artifact_manifest_real = std.Io.Dir.realPathFileAlloc(cwd_dir, io, artifact_manifest, allocator) catch artifact_manifest;
         if (!std.mem.eql(u8, artifact_manifest_real, wanted_manifest)) {
             std.log.debug("artifact's manifest-path [{s}] does not equal to package's manifest-path, ignored", .{artifact_manifest});
             continue;
@@ -166,7 +165,7 @@ pub fn main(init: std.process.Init) !void {
         const filenames = message.filenames orelse @panic("expected 'compiler-artifact' to contains a list of filenames");
 
         if (filenames.len == 0) {
-            @panic(try std.fmt.allocPrint(arena, "no filenames provided by Cargo", .{}));
+            @panic(try std.fmt.allocPrint(allocator, "no filenames provided by Cargo", .{}));
         }
 
         const cwd = std.Io.Dir.cwd();
@@ -182,10 +181,10 @@ pub fn main(init: std.process.Init) !void {
             const dirname = std.fs.path.dirname(artifact) orelse @panic("dirname cannot be null");
             const stem = std.fs.path.stem(artifact);
 
-            const without_extension = std.fs.path.join(gpa, &.{ dirname, stem }) catch @panic("OOM");
-            defer gpa.free(without_extension);
-            const artifact_d = try std.mem.concat(gpa, u8, &.{ without_extension, ".d" });
-            defer gpa.free(artifact_d);
+            const without_extension = std.fs.path.join(allocator, &.{ dirname, stem }) catch @panic("OOM");
+            defer allocator.free(without_extension);
+            const artifact_d = try std.mem.concat(allocator, u8, &.{ without_extension, ".d" });
+            defer allocator.free(artifact_d);
 
             std.log.debug("About to copy '{s}' to '{s}'", .{ artifact_d, deps_path });
 
@@ -198,7 +197,7 @@ pub fn main(init: std.process.Init) !void {
 
             var dst_writer = dst.writer(io, &.{});
             try dst_writer.seekTo(stat.size);
-            try write_dep_file(gpa, io, cwd, artifact_d, &dst_writer.interface);
+            try write_dep_file(allocator, io, cwd, artifact_d, &dst_writer.interface);
         }
     }
 }
@@ -272,8 +271,7 @@ fn walk_dep_directory(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir
 
     while (stack.items.len > 0) {
         const directory: std.Io.Dir = stack.pop().?;
-        const directory_old: std.Io.Dir = .{ .handle = directory.handle };
-        var it = directory_old.iterate();
+        var it = directory.iterate();
         while (try it.next(io)) |entry| {
             switch (entry.kind) {
                 .directory => {
@@ -285,12 +283,12 @@ fn walk_dep_directory(allocator: std.mem.Allocator, io: std.Io, root: std.Io.Dir
                 // TODO: Symlinks?
                 .file => {
                     try dep_writer.writeAll(" ");
-                    const full_path = try directory_old.realPathFileAlloc(io, entry.name, allocator);
+                    const full_path = try directory.realPathFileAlloc(io, entry.name, allocator);
                     defer allocator.free(full_path);
                     try render_filename(full_path, dep_writer);
                 },
                 else => {
-                    const full_path = try directory_old.realPathFileAlloc(io, entry.name, allocator);
+                    const full_path = try directory.realPathFileAlloc(io, entry.name, allocator);
                     defer allocator.free(full_path);
                     std.log.debug("Dep file: ignored {s} (not a file)", .{full_path});
                 },

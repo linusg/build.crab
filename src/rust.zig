@@ -475,8 +475,8 @@ test "tier 2" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const io = std.testing.io;
     const expectEqualStrings = std.testing.expectEqualStrings;
+    const io = std.testing.io;
 
     // https://doc.rust-lang.org/rustc/platform-support.html#tier-2-with-host-tools
 
@@ -645,8 +645,8 @@ test "tier 3" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const allocator = arena.allocator();
-    const io = std.testing.io;
     const expectEqualStrings = std.testing.expectEqualStrings;
+    const io = std.testing.io;
 
     // https://doc.rust-lang.org/rustc/platform-support.html#tier-3
 

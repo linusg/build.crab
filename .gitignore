@@ -8,5 +8,3 @@ cache/
 .zig-cache
 
 .DS_Store
-zig-pkg
-example

@@ -292,7 +292,6 @@ pub const Os = union(enum) {
             .cuda => .cuda,
             .tvos => .tvos,
             .watchos => .watchos,
-            .hermit => .hermit,
             .hurd => .hurd,
             .wasi => if (os.version_range.semver.includesVersion(.{ .major = 0, .minor = 1, .patch = 0 }))
                 .wasip1
@@ -307,10 +306,10 @@ pub const Os = union(enum) {
             .visionos => .visionos,
 
             // No longer supported by Zig
-            // .aix, .solaris
+            // .aix, .hermit, .solaris
 
             // Not supported by Rust
-            // .contiki, .managarm, .plan9, .serenity, .driverkit, .@"3ds", .ps3, .ps4, .ps5, .psp, .vita, .amdhsa, .amdpal, .mesa3d, .nvcl, .opencl, .opengl, .vulkan, .tios
+            // .managarm, .plan9, .serenity, .driverkit, .maccatalyst, .@"3ds", .wiiu, .@"switch", .gba, .psx, .ps3, .ps4, .ps5, .psp, .vita, .amdhsa, .amdpal, .mesa3d, .nvcl, .opencl, .opengl, .vulkan, .tios, .ashetos
             else => error.Unsupported,
         };
     }
